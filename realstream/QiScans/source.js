@@ -15465,46 +15465,229 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
     this.language = "en";
   }
 
+  // Paperback filter UI can crash if tags are null/undefined in this source.
   async getSearchTags() {
     return [];
   }
 
+  // ---------- tiny helpers ----------
+  absUrl(url) {
+    if (!url) return "";
+    if (url.startsWith("//")) return "https:" + url;
+    if (url.startsWith("/")) return this.baseUrl.replace(/\/$/, "") + url;
+    return url;
+  }
+
+  safeEncode(url) {
+    if (!url) return "";
+    try {
+      return encodeURI(decodeURI(url));
+    } catch {
+      // If decodeURI blows up on malformed %, just return the raw string
+      return url;
+    }
+  }
+
+  imgUrl($, img) {
+    const el = $(img);
+    const raw =
+      el.attr("data-src") ||
+      el.attr("data-lazy-src") ||
+      (el.attr("srcset") ? el.attr("srcset").split(" ")[0] : undefined) ||
+      el.attr("src") ||
+      el.attr("data-cfsrc") ||
+      "";
+
+    const abs = this.absUrl(String(raw || "").split("?resize")[0].trim());
+    return this.safeEncode(abs);
+  }
+
+  uniq(arr) {
+    const out = [];
+    const seen = new Set();
+    for (const x of arr) {
+      if (!x || seen.has(x)) continue;
+      seen.add(x);
+      out.push(x);
+    }
+    return out;
+  }
+
+  // Accept ONLY /series/<slug> (2 path segments). Reject /series/<slug>/chapter-##
+  seriesSlugFromHref(href) {
+    try {
+      const u = href.startsWith("http") ? new URL(href) : new URL(href, this.baseUrl);
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length !== 2) return "";
+      if (parts[0] !== "series") return "";
+      return parts[1];
+    } catch {
+      const parts = String(href).split("?")[0].split("/").filter(Boolean);
+      if (parts.length !== 2) return "";
+      if (parts[0] !== "series") return "";
+      return parts[1];
+    }
+  }
+
+  // ---------- Next.js / RSC helpers ----------
+  extractNextData(html) {
+    const m = String(html).match(
+      /<script[^>]+id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/
+    );
+    if (!m?.[1]) return null;
+    try {
+      return JSON.parse(m[1]);
+    } catch {
+      return null;
+    }
+  }
+
+  deepWalk(node, fn) {
+    if (!node) return;
+    fn(node);
+    if (Array.isArray(node)) {
+      for (const v of node) this.deepWalk(v, fn);
+      return;
+    }
+    if (typeof node === "object") {
+      for (const v of Object.values(node)) this.deepWalk(v, fn);
+    }
+  }
+
+  extractChapterIdsFromHtml(html) {
+    const ids = new Set();
+    const re = /chapter-(\d+(?:\.\d+)?)/g;
+    let m;
+    while ((m = re.exec(String(html))) !== null) {
+      ids.add(`chapter-${m[1]}`);
+    }
+    return [...ids];
+  }
+
+  extractChapterIdsFromNextData(nextData, mangaId) {
+    const ids = new Set();
+
+    // Find any string containing "/series/<mangaId>/chapter-XX"
+    const needle = `/series/${mangaId}/chapter-`;
+    this.deepWalk(nextData, (node) => {
+      if (typeof node !== "string") return;
+      if (!node.includes(needle)) return;
+
+      // Example: "/series/spirit-realm-walker/chapter-37"
+      const m = node.match(/\/series\/[^/]+\/(chapter-\d+(?:\.\d+)?)/i);
+      if (m?.[1]) ids.add(m[1]);
+    });
+
+    return [...ids];
+  }
+
+  extractPagesFromNextData(nextData) {
+    const pages = [];
+    this.deepWalk(nextData, (node) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+
+      // Direct page object { url: "...", order: 1 }
+      if (typeof node.url === "string" && node.order != null) {
+        if (/\.(jpe?g|png|webp)(\?|$)/i.test(node.url)) {
+          pages.push({ url: node.url, order: Number(node.order) || 0 });
+        }
+      }
+
+      // Or { images: [{url, order}, ...] }
+      if (Array.isArray(node.images)) {
+        for (const img of node.images) {
+          if (img && typeof img.url === "string") {
+            if (/\.(jpe?g|png|webp)(\?|$)/i.test(img.url)) {
+              pages.push({ url: img.url, order: Number(img.order) || 0 });
+            }
+          }
+        }
+      }
+    });
+
+    pages.sort((a, b) => a.order - b.order);
+    return this.uniq(pages.map((p) => this.safeEncode(this.absUrl(p.url))));
+  }
+
+  extractPagesFromRscText(text) {
+    const pages = [];
+
+    for (const line of String(text).split("\n")) {
+      const idx = line.indexOf("{");
+      if (idx < 0) continue;
+
+      const jsonPart = line.slice(idx);
+      try {
+        const obj = JSON.parse(jsonPart);
+
+        if (obj && typeof obj === "object") {
+          if (typeof obj.url === "string" && obj.order != null) {
+            if (/\.(jpe?g|png|webp)(\?|$)/i.test(obj.url)) {
+              pages.push({ url: obj.url, order: Number(obj.order) || 0 });
+            }
+          }
+
+          if (Array.isArray(obj.images)) {
+            for (const img of obj.images) {
+              if (img && typeof img.url === "string") {
+                if (/\.(jpe?g|png|webp)(\?|$)/i.test(img.url)) {
+                  pages.push({ url: img.url, order: Number(img.order) || 0 });
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore non-json lines
+      }
+    }
+
+    pages.sort((a, b) => a.order - b.order);
+    return this.uniq(pages.map((p) => this.safeEncode(this.absUrl(p.url))));
+  }
+
+  // ---------- overrides Paperback uses ----------
+  getMangaShareUrl(mangaId) {
+    return `${this.baseUrl}/series/${mangaId}`;
+  }
+
   async getHomePageSections(sectionCallback) {
-    // Use the helper already in your bundle (from realstreamHelper)
-    // If this name isn't in scope for some reason, see the note below.
     const section = createHomeSection("latest_updates", "Latest Updates", false);
     sectionCallback(section);
-  
+
     const request = App.createRequest({
       url: `${this.baseUrl}/latest`,
       method: "GET"
     });
-  
+
     const response = await this.requestManager.schedule(request, 1);
     this.checkResponseError(response);
-  
+
     const $ = load(response.data);
-  
+
     const items = [];
     const seen = new Set();
-  
-    // /latest contains <a href="/series/<slug>"> ... <img ...>
+
+    // Only accept /series/<slug> (NOT /series/<slug>/chapter-xx)
     for (const a of $('a[href^="/series/"]').toArray()) {
       const href = $(a).attr("href") ?? "";
-      const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+      const slug = this.seriesSlugFromHref(href);
       if (!slug || seen.has(slug)) continue;
-      seen.add(slug);
-  
+
       const img = $("img", a).first();
-      const image = img.length ? this.imgUrl($, img) : "";
+      if (!img?.length) continue;
+
+      const image = this.imgUrl($, img);
       if (!image) continue;
-  
+
       const alt = (img.attr("alt") ?? "").trim();
       const title =
         ($(a).attr("title") ?? "").trim() ||
         (alt.split(" - ")[0] ?? "").trim() ||
         slug;
-  
+
+      seen.add(slug);
+
       items.push(
         App.createPartialSourceManga({
           mangaId: slug,
@@ -15513,13 +15696,131 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
           subtitle: ""
         })
       );
-  
-      // keep it light
+
       if (items.length >= 50) break;
     }
-  
+
     section.items = items;
     sectionCallback(section);
+  }
+
+  async getSearchResults(query, metadata) {
+    const wanted = (query?.title ?? "").trim();
+    if (!wanted) {
+      return App.createPagedResults({ results: [], metadata: undefined });
+    }
+
+    // Try likely server-rendered search routes first (can include old series)
+    const candidates = [
+      `${this.baseUrl}/series?search=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/series/?s=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/?s=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/series?query=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/series?keyword=${encodeURIComponent(wanted)}`
+    ];
+
+    const parseListing = (html) => {
+      const $ = load(html);
+      const results = [];
+      const seen = new Set();
+
+      for (const a of $('a[href^="/series/"]').toArray()) {
+        const href = $(a).attr("href") ?? "";
+        const slug = this.seriesSlugFromHref(href);
+        if (!slug || seen.has(slug)) continue;
+
+        const img = $("img", a).first();
+        if (!img?.length) continue;
+
+        const image = this.imgUrl($, img);
+        if (!image) continue;
+
+        const alt = (img.attr("alt") ?? "").trim();
+        const title =
+          (alt.split(" - ")[0] ?? "").trim() ||
+          $(a).attr("title")?.trim() ||
+          slug;
+
+        // Match wanted if the server page returns a generic listing
+        if (wanted && !title.toLowerCase().includes(wanted.toLowerCase())) continue;
+
+        seen.add(slug);
+        results.push(
+          App.createPartialSourceManga({
+            mangaId: slug,
+            title,
+            image,
+            subtitle: ""
+          })
+        );
+
+        if (results.length >= 50) break;
+      }
+
+      return results;
+    };
+
+    for (const url of candidates) {
+      try {
+        const req = App.createRequest({ url, method: "GET" });
+        const res = await this.requestManager.schedule(req, 1);
+        this.checkResponseError(res);
+
+        const found = parseListing(res.data);
+        if (found.length) {
+          return App.createPagedResults({ results: found, metadata: undefined });
+        }
+      } catch {
+        // keep trying candidates
+      }
+    }
+
+    // Fallback: scrape /latest and filter titles (will miss very old series, but keeps search usable)
+    const fallbackReq = App.createRequest({ url: `${this.baseUrl}/latest`, method: "GET" });
+    const fallbackRes = await this.requestManager.schedule(fallbackReq, 1);
+    this.checkResponseError(fallbackRes);
+
+    const fallback = (() => {
+      const $ = load(fallbackRes.data);
+      const results = [];
+      const seen = new Set();
+
+      for (const a of $('a[href^="/series/"]').toArray()) {
+        const href = $(a).attr("href") ?? "";
+        const slug = this.seriesSlugFromHref(href);
+        if (!slug || seen.has(slug)) continue;
+
+        const img = $("img", a).first();
+        if (!img?.length) continue;
+
+        const image = this.imgUrl($, img);
+        if (!image) continue;
+
+        const alt = (img.attr("alt") ?? "").trim();
+        const title =
+          (alt.split(" - ")[0] ?? "").trim() ||
+          $(a).attr("title")?.trim() ||
+          slug;
+
+        if (!title.toLowerCase().includes(wanted.toLowerCase())) continue;
+
+        seen.add(slug);
+        results.push(
+          App.createPartialSourceManga({
+            mangaId: slug,
+            title,
+            image,
+            subtitle: ""
+          })
+        );
+
+        if (results.length >= 50) break;
+      }
+
+      return results;
+    })();
+
+    return App.createPagedResults({ results: fallback, metadata: undefined });
   }
 
   async getMangaDetails(mangaId) {
@@ -15543,7 +15844,7 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
 
     const titles = [mainTitle];
     if (altText && altText.includes(",")) {
-      for (const t of altText.split(",").map(x => x.trim()).filter(Boolean)) {
+      for (const t of altText.split(",").map((x) => x.trim()).filter(Boolean)) {
         if (!titles.includes(t)) titles.push(t);
       }
     }
@@ -15598,101 +15899,147 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
   }
 
   async getChapters(mangaId) {
-  const request = App.createRequest({
-    url: `${this.baseUrl}/series/${mangaId}`,
-    method: "GET"
-  });
-
-  const response = await this.requestManager.schedule(request, 1);
-  this.checkResponseError(response);
-
-  const $ = load(response.data);
-
-  // Look for actual chapter links on the page
-  const links = $('a[href*="/series/"][href*="chapter"]').toArray()
-    .map(a => $(a).attr("href"))
-    .filter(Boolean);
-
-  // If the site renders links server-side, this will work immediately.
-  // If it doesn't, links will be empty and you'll need to find the API it uses.
-  if (!links.length) {
-    throw new Error(
-      `No chapter links found in HTML for ${mangaId}. Chapters are likely loaded via an API/JS.`
-    );
-  }
-
-  // Normalize + dedupe
-  const seen = new Set();
-  const chapterUrls = [];
-  for (const href of links) {
-    const abs = this.absUrl(href);
-    if (seen.has(abs)) continue;
-    seen.add(abs);
-    chapterUrls.push(abs);
-  }
-
-  // Build chapters from real URLs; store the URL as the chapterId
-  // (Then getChapterDetails can request chapterId directly.)
-  let sortingIndex = 0;
-  const chapters = chapterUrls.map(url => {
-    const name = ($( `a[href="${url.replace(this.baseUrl, "")}"]` ).text() || "").trim() || url.split("/").filter(Boolean).pop();
-    const numMatch = url.match(/chapter[-/](\d+(?:\.\d+)?)/i);
-    const chapNum = numMatch ? Number(numMatch[1]) : 0;
-
-    return App.createChapter({
-      id: url,                // <-- IMPORTANT: real URL, not "chapter-37"
-      mangaId,
-      name: name || `Chapter ${chapNum || "?"}`,
-      chapNum,
-      langCode: this.language,
-      time: new Date(),
-      sortingIndex: sortingIndex--,
-      volume: 0,
-      group: ""
+    const request = App.createRequest({
+      url: `${this.baseUrl}/series/${mangaId}`,
+      method: "GET"
     });
-  });
 
-  return chapters;
-}
+    const response = await this.requestManager.schedule(request, 1);
+    this.checkResponseError(response);
 
-    async getChapterDetails(mangaId, chapterId) {
-  const url = chapterId.startsWith("http") ? chapterId : this.absUrl(chapterId);
+    const html = String(response.data);
 
-  const request = App.createRequest({ url, method: "GET" });
-  const response = await this.requestManager.schedule(request, 1);
-  this.checkResponseError(response);
+    // 1) Try to extract chapter ids from raw HTML text
+    let chapterIds = this.extractChapterIdsFromHtml(html);
 
-  const $ = load(response.data);
+    // 2) If none, try embedded __NEXT_DATA__
+    if (!chapterIds.length) {
+      const nextData = this.extractNextData(html);
+      if (nextData) {
+        chapterIds = this.extractChapterIdsFromNextData(nextData, mangaId);
+      }
+    }
 
-  // Only call it "locked" if we fail to get pages AND we see an obvious paywall element/message.
-  const pageImgs = $('img').toArray()
-    .map(img => this.imgUrl($, img))
-    .filter(u =>
-      u &&
-      !u.toLowerCase().includes("logo") &&
-      !u.toLowerCase().endsWith(".svg") &&
-      /\.(jpe?g|png|webp)(\?|$)/i.test(u)
+    // 3) If still none, last-resort regex on URLs in the HTML
+    if (!chapterIds.length) {
+      const matches = [...html.matchAll(/chapter-(\d+(?:\.\d+)?)/gi)].map((m) => `chapter-${m[1]}`);
+      chapterIds = this.uniq(matches);
+    }
+
+    if (!chapterIds.length) {
+      throw new Error(
+        `Couldn't find chapters for ${mangaId}. QiScans likely moved chapter data behind an API/Next payload.`
+      );
+    }
+
+    // Normalize + sort by chapNum desc
+    const parsed = chapterIds
+      .map((id) => {
+        const n = Number(String(id).replace("chapter-", ""));
+        return { id, chapNum: isNaN(n) ? 0 : n };
+      })
+      .sort((a, b) => {
+        if (a.chapNum !== b.chapNum) return b.chapNum - a.chapNum;
+        return String(b.id).localeCompare(String(a.id));
+      });
+
+    return parsed.map((c, idx) =>
+      App.createChapter({
+        id: c.id, // keep "chapter-37" etc
+        mangaId,
+        name: `Chapter ${c.chapNum || String(c.id).replace("chapter-", "")}`,
+        chapNum: c.chapNum || 0,
+        langCode: this.language,
+        time: new Date(),
+        sortingIndex: idx,
+        volume: 0,
+        group: ""
+      })
     );
-
-  const pages = this.uniq(pageImgs);
-
-  if (!pages.length) {
-    // Make this stricter than your current "unlock/coins anywhere in text"
-    const paywallHint =
-      /locked|premium|subscribe|unlock/i.test($.text()) &&
-      /coin|purchase|payment|login/i.test($.text());
-
-    if (paywallHint) throw new Error("This chapter appears to be locked/premium on QiScans.");
-
-    throw new Error(`No pages extracted. The reader likely loads images via JS/API for: ${url}`);
   }
 
-  return App.createChapterDetails({
-    id: chapterId,
-    mangaId,
-    pages
-  });
-}
+  async getChapterDetails(mangaId, chapterId) {
+    const normalized = String(chapterId).startsWith("chapter-")
+      ? String(chapterId)
+      : `chapter-${chapterId}`;
+
+    const url = `${this.baseUrl}/series/${mangaId}/${normalized}`;
+
+    // 1) Normal HTML request
+    const request = App.createRequest({ url, method: "GET" });
+    const response = await this.requestManager.schedule(request, 1);
+    this.checkResponseError(response);
+
+    const html = String(response.data);
+
+    let pages = [];
+
+    // Try __NEXT_DATA__ first
+    const nextData = this.extractNextData(html);
+    if (nextData) {
+      pages = this.extractPagesFromNextData(nextData);
+    }
+
+    // 2) Fallback: RSC request (Next.js trick)
+    if (!pages.length) {
+      try {
+        const rscReq = App.createRequest({
+          url,
+          method: "GET",
+          headers: {
+            rsc: "1",
+            accept: "text/x-component,*/*"
+          }
+        });
+
+        const rscRes = await this.requestManager.schedule(rscReq, 1);
+        this.checkResponseError(rscRes);
+
+        pages = this.extractPagesFromRscText(rscRes.data);
+      } catch {
+        // ignore and continue to last fallback
+      }
+    }
+
+    // 3) Last fallback: scrape <img> tags (often just logos on QiScans)
+    if (!pages.length) {
+      const $ = load(html);
+      const imgPages = $("img")
+        .toArray()
+        .map((img) => this.imgUrl($, img))
+        .filter((u) => {
+          const s = String(u).toLowerCase();
+          if (!s) return false;
+          if (s.endsWith(".svg")) return false;
+          if (s.includes("logo")) return false;
+          return /\.(jpe?g|png|webp)(\?|$)/i.test(u);
+        });
+
+      pages = this.uniq(imgPages);
+    }
+
+    // Only say "locked" if we got nothing AND the page text strongly suggests paywall
+    if (!pages.length) {
+      const text = load(html).text();
+      const looksLocked =
+        /locked|premium|subscribe|unlock/i.test(text) &&
+        /coin|purchase|payment|login/i.test(text);
+
+      if (looksLocked) {
+        throw new Error("This chapter appears to be locked/premium on QiScans.");
+      }
+
+      throw new Error(
+        `No page images found for ${mangaId} ${normalized}. QiScans likely changed the embedded reader payload.`
+      );
+    }
+
+    return App.createChapterDetails({
+      id: normalized,
+      mangaId,
+      pages
+    });
+  }
 };
 return __toCommonJS(QiScans_exports);
 })();
