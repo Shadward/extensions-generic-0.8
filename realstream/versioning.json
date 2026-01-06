@@ -8,7 +8,7 @@
       "desc": "Extension that pulls manga from https://qiscans.org",
       "website": "https://github.com/Shadward/real-extensions",
       "contentRating": "MATURE",
-      "version": "3.0.1",
+      "version": "3.0.2",
       "icon": "icon.png",
       "tags": [],
       "websiteBaseURL": "https://qiscans.org",
