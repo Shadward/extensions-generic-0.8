@@ -15479,7 +15479,7 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
   const response = await this.requestManager.schedule(request, 1);
   this.checkResponseError(response);
 
-  const $ = this.cheerio.load(response.data);
+  const $ = load(response.data);
 
   const items = [];
   const seen = new Set();
@@ -15529,7 +15529,7 @@ async getSearchResults(query, metadata) {
   const response = await this.requestManager.schedule(request, 1);
   this.checkResponseError(response);
 
-  const $ = this.cheerio.load(response.data);
+  const $ = load(response.data);
 
   const results = [];
   const seen = new Set();
@@ -15616,7 +15616,7 @@ async getSearchResults(query, metadata) {
     const response = await this.requestManager.schedule(request, 1);
     this.checkResponseError(response);
 
-    const $ = this.cheerio.load(response.data);
+    const $ = load(response.data);
 
     const mainTitle =
       $("h1").first().text().trim() ||
@@ -15691,7 +15691,7 @@ async getSearchResults(query, metadata) {
     const response = await this.requestManager.schedule(request, 1);
     this.checkResponseError(response);
 
-    const $ = this.cheerio.load(response.data);
+    const $ = load(response.data);
     const text = $.text();
 
     let total = 0;
@@ -15752,7 +15752,7 @@ async getSearchResults(query, metadata) {
     const response = await this.requestManager.schedule(request, 1);
     this.checkResponseError(response);
 
-    const $ = this.cheerio.load(response.data);
+    const $ = load(response.data);
 
     const text = $.text();
     if (/unlock/i.test(text) && /coins?/i.test(text)) {
