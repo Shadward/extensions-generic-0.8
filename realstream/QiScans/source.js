@@ -15465,20 +15465,39 @@ var QiScans = class extends RealStream {
     this.language = "en";
   }
 
-  // Paperback search UI expects this to exist. If you return null, you get "filterItems.map" crashes.
+  // Paperback will try to render filters UI if you return tags.
+  // Returning [] prevents "filterItems.map" crashes.
   async getSearchTags() {
     return [];
   }
 
-  // ------------------------
-  // helpers
-  // ------------------------
+  // ---------------- helpers ----------------
   absUrl(url) {
     if (!url) return "";
     if (url.startsWith("//")) return "https:" + url;
     if (url.startsWith("/")) return this.baseUrl.replace(/\/$/, "") + url;
-    if (url.startsWith("http://")) return url.replace(/^http:\/\//, "https://");
     return url;
+  }
+
+  imgUrl($, imgEl) {
+    if (!imgEl) return "";
+    const el = $(imgEl);
+    const raw =
+      el.attr("data-src") ||
+      el.attr("data-lazy-src") ||
+      el.attr("data-original") ||
+      (el.attr("srcset") ? el.attr("srcset").split(" ")[0] : undefined) ||
+      el.attr("src") ||
+      el.attr("data-cfsrc") ||
+      "";
+
+    const abs = this.absUrl((raw || "").trim());
+    if (!abs) return "";
+    try {
+      return encodeURI(decodeURI(abs.split("?resize")[0].trim()));
+    } catch {
+      return abs.split("?resize")[0].trim();
+    }
   }
 
   uniq(arr) {
@@ -15492,202 +15511,127 @@ var QiScans = class extends RealStream {
     return out;
   }
 
-  cleanDesc(desc) {
-    if (!desc) return "";
-    // common "…See more" / "See more" truncators from sites
-    return desc
-      .replace(/\u2026\s*See more.*$/i, "")
-      .replace(/\.{3}\s*See more.*$/i, "")
-      .replace(/\s+See more\s*$/i, "")
-      .trim();
+  normalizeWhitespace(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
   }
 
-  imgUrl($, imgEl) {
-    if (!imgEl) return "";
-    const el = $(imgEl);
+  isJunkImageUrl(u) {
+    const url = (u || "").toLowerCase();
+    if (!url) return true;
+    if (url.endsWith(".svg")) return true;
 
-    const raw =
-      el.attr("data-src") ||
-      el.attr("data-lazy-src") ||
-      el.attr("data-original") ||
-      el.attr("data-cfsrc") ||
-      (el.attr("srcset") ? el.attr("srcset").split(/\s+/)[0] : undefined) ||
-      el.attr("src") ||
-      "";
+    // obvious junk/branding/social icons
+    const bad = [
+      "discord",
+      "telegram",
+      "t.me",
+      "facebook",
+      "twitter",
+      "x.com",
+      "tiktok",
+      "instagram",
+      "patreon",
+      "favicon",
+      "avatar",
+      "logo",
+      "watermark",
+      "icon",
+      "icons",
+      "sprite",
+      "banner",
+      "ads",
+      "advert"
+    ];
+    if (bad.some(k => url.includes(k))) return true;
 
-    const abs = this.absUrl((raw || "").trim());
-    if (!abs) return "";
+    // must look like an image
+    if (!/\.(jpe?g|png|webp)(\?|$)/i.test(url)) return true;
 
-    // strip common resize params
-    const cleaned = abs.split("?resize")[0].trim();
-
-    try {
-      return encodeURI(decodeURI(cleaned));
-    } catch {
-      // if it’s already weirdly encoded, just return the cleaned URL
-      return cleaned;
-    }
+    return false;
   }
 
-  looksLikeJson(s) {
-    if (!s || typeof s !== "string") return false;
-    const t = s.trim();
-    return t.startsWith("{") || t.startsWith("[");
+  isLikelyPageImageUrl(u) {
+    if (!u) return false;
+    if (this.isJunkImageUrl(u)) return false;
+
+    // “page” images usually live in uploads/cdn paths; not required, but helps avoid random UI assets
+    const url = u.toLowerCase();
+    const goodHints = ["uploads", "wp-content/uploads", "cdn", "imagedelivery", "cloudfront"];
+    // If none of the hints are present, still allow it — some sites serve pages from weird paths.
+    // (So this is NOT a hard requirement.)
+    return true;
   }
 
-  safeJsonParse(s) {
-    if (!this.looksLikeJson(s)) return null;
-    try {
-      return JSON.parse(s);
-    } catch {
-      return null;
-    }
+  parseChapterNumFromUrl(url) {
+    const u = (url || "").toLowerCase();
+    // chapter-12 / chapter/12 / ch-12 etc
+    const m =
+      u.match(/chapter[-/](\d+(?:\.\d+)?)/i) ||
+      u.match(/\/ch[-/](\d+(?:\.\d+)?)/i) ||
+      u.match(/[-/](\d+(?:\.\d+)?)\/?$/i);
+    if (!m?.[1]) return 0;
+    const n = Number(m[1]);
+    return isNaN(n) ? 0 : n;
   }
 
-  // Extract series cards from an HTML page which contains <a href="/series/<slug>"><img ...>
-  extractSeriesFromHtml($) {
-    const items = [];
-    const seen = new Set();
-
-    // widest net: any <a> to /series/<something> (but not /series?tag=...)
-    for (const aEl of $('a[href^="/series/"]').toArray()) {
-      const href = ($(aEl).attr("href") || "").trim();
-      if (!href || href.includes("?")) continue;
-
-      const slug = href.replace(/\/$/, "").split("/").pop() || "";
-      if (!slug || seen.has(slug)) continue;
-
-      const imgSel = $("img", aEl).first();
-      const imgEl = imgSel.length ? imgSel[0] : null;
-      const image = imgEl ? this.imgUrl($, imgEl) : "";
-      if (!image) continue;
-
-      const alt = (imgSel.attr("alt") || "").trim();
-      const title =
-        (($(aEl).attr("title") || "").trim()) ||
-        ((alt.split(" - ")[0] || "").trim()) ||
-        slug;
-
-      // filter obvious garbage/placeholder entries
-      if (!title || title.toLowerCase() === "book") continue;
-
-      seen.add(slug);
-      items.push(
-        App.createPartialSourceManga({
-          mangaId: slug,
-          title,
-          image,
-          subtitle: ""
-        })
-      );
-
-      if (items.length >= 60) break;
-    }
-
-    return items;
-  }
-
-  // Extract chapter URLs from HTML by looking for links which *start with* /series/<slug>/...
-  // This avoids random “release / previous chapter” links from elsewhere.
-  extractChapterUrlsFromHtml($, mangaId) {
+  extractChapterUrls($, html, mangaId) {
     const urls = [];
-    const seen = new Set();
 
-    const prefix = `/series/${mangaId}/`;
-
-    for (const aEl of $("a[href]").toArray()) {
-      const hrefRaw = ($(aEl).attr("href") || "").trim();
-      if (!hrefRaw) continue;
-
-      // Must be a chapter link under this series
-      if (!hrefRaw.startsWith(prefix) && !hrefRaw.startsWith(this.absUrl(prefix))) continue;
-
-      // Try to avoid non-chapter routes (like the series page itself)
-      const href = this.absUrl(hrefRaw);
-      const path = href.replace(this.baseUrl, "");
-      if (path.replace(/\/$/, "") === prefix.replace(/\/$/, "")) continue;
-
-      // Heuristic: needs to contain "chapter" or a numeric tail
-      if (!/chapter/i.test(href) && !/\/\d+(\.\d+)?\/?$/.test(href)) continue;
-
-      if (seen.has(href)) continue;
-      seen.add(href);
-      urls.push(href);
+    // A) best case: real chapter list in DOM (classic theme)
+    const liChaps = $("div#chapterlist li, ul#chapterlist li, #chapterlist li").toArray();
+    for (const li of liChaps) {
+      const a = $("a", li).first();
+      const href = a.attr("href") || "";
+      if (href) urls.push(this.absUrl(href));
     }
 
-    return urls;
-  }
-
-  // Pull likely image URLs out of raw HTML (covers script-embedded arrays etc)
-  extractImageUrlsFromText(html) {
-    if (!html) return [];
-    const matches = [...html.matchAll(/https?:\/\/[^"'\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'\\\s]*)?/gi)]
-      .map(m => m[0]);
-    return matches;
-  }
-
-  // Reject obvious non-page assets
-  filterPageImages(urls) {
-    const bad = /(logo|discord|telegram|icon|favicon|avatar|sprite|placeholder|badge)/i;
-    const out = [];
-
-    for (const u of urls) {
-      if (!u) continue;
-      const url = u.trim();
-      if (!/\.(jpe?g|png|webp)(\?|$)/i.test(url)) continue;
-      if (bad.test(url)) continue;
-      out.push(url);
+    // B) any anchor which looks like a chapter for this series
+    if (!urls.length) {
+      const anchors = $(`a[href*="/series/${mangaId}/"]`).toArray();
+      for (const a of anchors) {
+        const href = $(a).attr("href") || "";
+        const abs = this.absUrl(href);
+        if (!abs) continue;
+        if (/\/series\/[^/]+\/(chapter|ch)[-/]/i.test(abs) || abs.toLowerCase().includes("/chapter-")) {
+          urls.push(abs);
+        }
+      }
     }
 
-    return this.uniq(out);
-  }
-
-  // Best-effort: sometimes Next.js sites embed everything in __NEXT_DATA__
-  tryExtractFromNextData(html) {
-    const $ = load(html);
-    const next = $('#__NEXT_DATA__').first().text()?.trim();
-    if (!next) return null;
-    const data = this.safeJsonParse(next);
-    if (!data) return null;
-    return data;
-  }
-
-  // Walk any object to find arrays of strings which look like image URLs
-  findImageArraysInObject(obj) {
-    const out = [];
-    const seen = new Set();
-
-    const visit = (node, depth) => {
-      if (!node || depth > 10) return;
-      if (Array.isArray(node)) {
-        if (node.length && node.every(x => typeof x === "string")) {
-          for (const s of node) {
-            if (typeof s === "string" && /https?:\/\/.*\.(jpe?g|png|webp)(\?|$)/i.test(s)) {
-              if (!seen.has(s)) {
-                seen.add(s);
-                out.push(s);
-              }
-            }
-          }
-        } else {
-          for (const x of node) visit(x, depth + 1);
-        }
-        return;
-      }
-      if (typeof node === "object") {
-        for (const k of Object.keys(node)) {
-          visit(node[k], depth + 1);
+    // C) scripts/HTML regex fallback: pull any /series/<id>/chapter-* occurrences
+    if (!urls.length) {
+      const re = new RegExp(`/series/${mangaId}/[^"'\\s<>]+`, "gi");
+      const matches = html.match(re) || [];
+      for (const m of matches) {
+        const abs = this.absUrl(m);
+        if (!abs) continue;
+        const low = abs.toLowerCase();
+        if (low.includes("/chapter-") || /\/(chapter|ch)[-/]/i.test(low)) {
+          urls.push(abs);
         }
       }
-    };
+    }
 
-    visit(obj, 0);
-    return out;
+    // D) data-num fallback: build chapter URLs if we can find numbers
+    // (A bunch of these themes do <li data-num="37"> without exposing the URL cleanly)
+    if (!urls.length) {
+      const reNum = /data-num\s*=\s*["'](\d+(?:\.\d+)?)["']/gi;
+      let m;
+      const nums = [];
+      while ((m = reNum.exec(html)) !== null) {
+        const n = Number(m[1]);
+        if (!isNaN(n)) nums.push(n);
+      }
+      const uniqNums = this.uniq(nums.map(x => String(x))).map(x => Number(x)).filter(x => !isNaN(x));
+      for (const n of uniqNums) {
+        urls.push(`${this.baseUrl}/series/${mangaId}/chapter-${n}`);
+      }
+    }
+
+    return this.uniq(urls);
   }
 
-  // ------------------------
-  // required overrides
-  // ------------------------
+  // ---------------- required overrides ----------------
   getMangaShareUrl(mangaId) {
     return `${this.baseUrl}/series/${mangaId}`;
   }
@@ -15706,10 +15650,113 @@ var QiScans = class extends RealStream {
 
     const $ = load(response.data);
 
-    const items = this.extractSeriesFromHtml($);
-    section.items = items;
+    const items = [];
+    const seen = new Set();
 
+    // /latest contains <a href="/series/<slug>"> ... <img ...>
+    for (const aEl of $('a[href^="/series/"]').toArray()) {
+      const href = $(aEl).attr("href") ?? "";
+      const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+      if (!slug || seen.has(slug)) continue;
+
+      const img = $("img", aEl).first();
+      const image = img.length ? this.imgUrl($, img[0]) : "";
+      if (!image || this.isJunkImageUrl(image)) continue;
+
+      const alt = (img.attr("alt") ?? "").trim();
+      const title =
+        this.normalizeWhitespace(($(aEl).attr("title") ?? "").trim()) ||
+        this.normalizeWhitespace((alt.split(" - ")[0] ?? "").trim()) ||
+        slug;
+
+      seen.add(slug);
+      items.push(
+        App.createPartialSourceManga({
+          mangaId: slug,
+          title,
+          image,
+          subtitle: ""
+        })
+      );
+
+      if (items.length >= 60) break;
+    }
+
+    section.items = items;
     sectionCallback(section);
+  }
+
+  async getSearchResults(query, metadata) {
+    const wanted = this.normalizeWhitespace(query?.title || "");
+    if (!wanted) {
+      return App.createPagedResults({ results: [], metadata: undefined });
+    }
+
+    // Try the site's actual search first
+    const tryUrls = [
+      `${this.baseUrl}/?s=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/series/?s=${encodeURIComponent(wanted)}`,
+      `${this.baseUrl}/?post_type=wp-manga&s=${encodeURIComponent(wanted)}`, // harmless if unsupported
+      `${this.baseUrl}/latest` // last resort fallback
+    ];
+
+    let results = [];
+    for (const url of tryUrls) {
+      const request = App.createRequest({ url, method: "GET" });
+      const response = await this.requestManager.schedule(request, 1);
+      this.checkResponseError(response);
+
+      const $ = load(response.data);
+
+      const seen = new Set();
+      const found = [];
+
+      // Grab series cards/links pointing to /series/<slug>
+      for (const aEl of $('a[href^="/series/"]').toArray()) {
+        const href = $(aEl).attr("href") ?? "";
+        const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+        if (!slug || seen.has(slug)) continue;
+
+        // Pull an image near the link (sometimes inside it, sometimes adjacent)
+        let img = $("img", aEl).first();
+        if (!img.length) img = $(aEl).find("img").first();
+
+        let image = img.length ? this.imgUrl($, img[0]) : "";
+        if (!image || this.isJunkImageUrl(image)) continue;
+
+        const alt = (img.attr("alt") ?? "").trim();
+        const title =
+          this.normalizeWhitespace(($(aEl).attr("title") ?? "").trim()) ||
+          this.normalizeWhitespace((alt.split(" - ")[0] ?? "").trim()) ||
+          slug;
+
+        // If we're on /latest fallback and query exists, filter by substring
+        if (url.endsWith("/latest")) {
+          if (!title.toLowerCase().includes(wanted.toLowerCase())) continue;
+        }
+
+        seen.add(slug);
+        found.push(
+          App.createPartialSourceManga({
+            mangaId: slug,
+            title,
+            image,
+            subtitle: ""
+          })
+        );
+      }
+
+      // If this attempt found anything, stop.
+      if (found.length) {
+        results = found;
+        break;
+      }
+    }
+
+    return App.createPagedResults({
+      results,
+      metadata: undefined
+    });
   }
 
   async getMangaDetails(mangaId) {
@@ -15724,47 +15771,49 @@ var QiScans = class extends RealStream {
     const $ = load(response.data);
 
     const mainTitle =
-      $("h1").first().text().trim() ||
-      $('meta[property="og:title"]').attr("content")?.trim() ||
+      this.normalizeWhitespace($("h1").first().text()) ||
+      this.normalizeWhitespace($('meta[property="og:title"]').attr("content")) ||
       mangaId;
 
-    let altText = $("h1").first().next().text().trim();
-    if (!altText) altText = $("h1").first().parent().find("p, div").first().text().trim();
+    // try to pick up alt titles from common locations
+    let altText = this.normalizeWhitespace($("h1").first().next().text());
+    if (!altText) altText = this.normalizeWhitespace($("h1").first().parent().find("p, div").first().text());
 
     const titles = [mainTitle];
     if (altText && altText.includes(",")) {
-      for (const t of altText.split(",").map(x => x.trim()).filter(Boolean)) {
+      for (const t of altText.split(",").map(x => this.normalizeWhitespace(x)).filter(Boolean)) {
         if (!titles.includes(t)) titles.push(t);
       }
     }
 
-    let image = $('meta[property="og:image"]').attr("content")?.trim() || "";
+    // Cover
+    let image = this.normalizeWhitespace($('meta[property="og:image"]').attr("content")) || "";
     if (image) image = this.absUrl(image);
 
     if (!image) {
       for (const imgEl of $("img").toArray()) {
         const src = this.imgUrl($, imgEl);
-        if (!src) continue;
-        if (/(logo|icon|favicon)/i.test(src)) continue;
+        if (!src || this.isJunkImageUrl(src)) continue;
         image = src;
         break;
       }
     }
 
-    let desc =
-      $('h3:contains("Synopsis"), h2:contains("Synopsis")').first().next().text().trim() ||
-      $('meta[name="description"]').attr("content")?.trim() ||
+    // Description (try Synopsis first)
+    const desc =
+      this.normalizeWhitespace($('h3:contains("Synopsis"), h2:contains("Synopsis")').first().next().text()) ||
+      this.normalizeWhitespace($('meta[name="description"]').attr("content")) ||
       "";
 
-    desc = this.cleanDesc(desc);
-
+    // Status (best effort)
     const pageText = $.text();
     let status = "Ongoing";
     if (/completed/i.test(pageText)) status = "Completed";
 
+    // Genres
     const genreTags = [];
     for (const aEl of $('a[href*="/series?tag="]').toArray()) {
-      const label = $(aEl).text().trim();
+      const label = this.normalizeWhitespace($(aEl).text());
       if (!label) continue;
       const id = label.toLowerCase().replace(/\s+/g, "-");
       genreTags.push(App.createTag({ id, label }));
@@ -15789,7 +15838,6 @@ var QiScans = class extends RealStream {
   }
 
   async getChapters(mangaId) {
-    // Step 1: load series page
     const request = App.createRequest({
       url: `${this.baseUrl}/series/${mangaId}`,
       method: "GET"
@@ -15801,73 +15849,45 @@ var QiScans = class extends RealStream {
     const html = response.data;
     const $ = load(html);
 
-    // Step 2: try to extract real chapter URLs from HTML
-    let chapterUrls = this.extractChapterUrlsFromHtml($, mangaId);
+    const chapterUrls = this.extractChapterUrls($, html, mangaId);
 
-    // Step 3: if HTML only gives 1-2 links, it’s probably JS/API driven.
-    // We’ll try a couple extra patterns that sometimes exist in embedded data.
-    if (chapterUrls.length < 5) {
-      // Try __NEXT_DATA__ (modern frontend sites)
-      const next = this.tryExtractFromNextData(html);
-
-      // If next data exists, try to find ANY URLs which look like chapters for this series
-      if (next) {
-        const blob = JSON.stringify(next);
-        const re = new RegExp(`${this.baseUrl.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\/series\\/${mangaId}\\/[^\\"\\s]+`, "gi");
-        const found = [...blob.matchAll(re)].map(m => m[0]);
-        chapterUrls = chapterUrls.concat(found.map(u => this.absUrl(u)));
-        chapterUrls = this.uniq(chapterUrls);
-      }
-    }
-
-    // Still nothing useful => we can’t fake a chapter list without hitting their real chapter API.
-    if (chapterUrls.length < 2) {
+    if (!chapterUrls.length) {
       throw new Error(
-        `QiScans: couldn't extract a chapter list for "${mangaId}" from HTML. ` +
-        `This site likely loads chapters via JS/API.`
+        `QiScans: couldn't extract a chapter list for "${mangaId}" from HTML. This site likely loads chapters via JS/API.`
       );
     }
 
-    // Build chapters
-    const chapters = [];
-    for (const url of chapterUrls) {
-      const u = this.absUrl(url);
+    const chapters = chapterUrls.map((url) => {
+      const chapNum = this.parseChapterNumFromUrl(url);
 
-      const numMatch = u.match(/chapter[^0-9]*?(\d+(?:\.\d+)?)/i) || u.match(/\/(\d+(?:\.\d+)?)\/?$/);
-      const chapNum = numMatch?.[1] ? Number(numMatch[1]) : 0;
+      // Try to find a label near the exact URL (often not possible); fall back to “Chapter N”
+      const name =
+        (chapNum ? `Chapter ${chapNum}` : this.normalizeWhitespace(url.split("/").filter(Boolean).pop() || "Chapter"));
 
-      chapters.push(
-        App.createChapter({
-          id: u,         // store real chapter URL as id
-          mangaId,
-          name: chapNum ? `Chapter ${chapNum}` : (u.split("/").filter(Boolean).pop() || "Chapter"),
-          chapNum: chapNum || 0,
-          langCode: this.language,
-          time: new Date(),
-          sortingIndex: 0,
-          volume: 0,
-          group: ""
-        })
-      );
-    }
-
-    // Sort: higher chapter number first (what you want)
-    // If chapNum is missing (0), keep those at the bottom but stable-ish.
-    chapters.sort((a, b) => {
-      const an = a.chapNum || 0;
-      const bn = b.chapNum || 0;
-      if (an === 0 && bn === 0) return 0;
-      if (an === 0) return 1;
-      if (bn === 0) return -1;
-      return bn - an;
+      return {
+        url,
+        chapNum,
+        name
+      };
     });
 
-    // Give a stable sortingIndex (PaperBack likes it)
-    for (let i = 0; i < chapters.length; i++) {
-      chapters[i].sortingIndex = -i;
-    }
+    // Sort: highest chapter first when we have numbers.
+    chapters.sort((a, b) => (b.chapNum || 0) - (a.chapNum || 0));
 
-    return chapters;
+    // Build Paperback chapters (sortingIndex increasing is “stable”)
+    return chapters.map((c, idx) =>
+      App.createChapter({
+        id: c.url, // IMPORTANT: store real URL as chapterId
+        mangaId,
+        name: c.name,
+        chapNum: c.chapNum || 0,
+        langCode: this.language,
+        time: new Date(),
+        sortingIndex: idx,
+        volume: 0,
+        group: ""
+      })
+    );
   }
 
   async getChapterDetails(mangaId, chapterId) {
@@ -15880,30 +15900,58 @@ var QiScans = class extends RealStream {
     const html = response.data;
     const $ = load(html);
 
-    // 1) Try real page images from <img>
-    let urls = $("img").toArray().map(imgEl => this.imgUrl($, imgEl));
+    // 1) Prefer reader/content containers
+    const containerSelectors = [
+      "div#reader img",
+      "div.reader img",
+      "div.reader-area img",
+      "div.reading-content img",
+      "div#chapter-content img",
+      "div.entry-content img",
+      "article img",
+      "main img"
+    ];
 
-    // 2) If that’s mostly empty/garbage, pull URLs out of scripts/text too
-    if (urls.filter(Boolean).length < 3) {
-      urls = urls.concat(this.extractImageUrlsFromText(html));
+    let pages = [];
+    for (const sel of containerSelectors) {
+      const found = $(sel).toArray()
+        .map(imgEl => this.imgUrl($, imgEl))
+        .filter(u => this.isLikelyPageImageUrl(u));
+      pages = pages.concat(found);
+    }
+    pages = this.uniq(pages);
+
+    // If we only got a tiny handful and they smell like branding, treat as failure and keep digging
+    const looksLikeOnlyJunk =
+      pages.length > 0 &&
+      pages.length <= 6 &&
+      pages.every(u => this.isJunkImageUrl(u) || /qiscans/i.test(u));
+
+    if (!pages.length || looksLikeOnlyJunk) {
+      pages = [];
     }
 
-    // 3) If Next.js or JSON blobs exist, try those too
-    const next = this.tryExtractFromNextData(html);
-    if (next) {
-      urls = urls.concat(this.findImageArraysInObject(next));
+    // 2) Script regex fallback: yank image URLs out of HTML/JS
+    if (!pages.length) {
+      const matches = [...html.matchAll(/https?:\/\/[^"'\\\s<>]+?\.(?:jpe?g|png|webp)(?:\?[^"'\\\s<>]*)?/gi)]
+        .map(m => m[0])
+        .filter(u => this.isLikelyPageImageUrl(u));
+
+      pages = this.uniq(matches);
     }
 
-    // normalize + filter out logos/icons/discord/etc
-    let pages = this.filterPageImages(urls.map(u => this.absUrl(u)));
+    // 3) Paywall detection ONLY if we have zero usable pages
+    if (!pages.length) {
+      const text = $.text().toLowerCase();
+      const paywallHint =
+        (text.includes("locked") || text.includes("premium") || text.includes("unlock")) &&
+        (text.includes("coin") || text.includes("purchase") || text.includes("subscribe") || text.includes("login"));
 
-    // If we ended up with only a couple images, it's almost always “reader chrome” not pages.
-    // Better to fail loudly than show the QiScans logo 4 times.
-    if (pages.length < 3) {
-      throw new Error(
-        `QiScans: couldn't extract real pages for this chapter. ` +
-        `The reader likely loads images via JS/API or blocks direct scraping: ${url}`
-      );
+      if (paywallHint) {
+        throw new Error("This chapter appears to be locked/premium on QiScans.");
+      }
+
+      throw new Error(`QiScans: couldn't extract page images for ${url}. The reader may load pages via JS/API.`);
     }
 
     return App.createChapterDetails({
@@ -15911,78 +15959,6 @@ var QiScans = class extends RealStream {
       mangaId,
       pages
     });
-  }
-
-  async getSearchResults(query, metadata) {
-    const wanted = (query?.title ?? "").trim();
-    const wantedLower = wanted.toLowerCase();
-
-    // If user didn't type anything, return empty (PaperBack won't crash)
-    if (!wanted) {
-      return App.createPagedResults({ results: [], metadata: undefined });
-    }
-
-    // Try a few plausible search URLs first (site might support one of these)
-    const candidates = [
-      `${this.baseUrl}/?s=${encodeURIComponent(wanted)}`,
-      `${this.baseUrl}/series/?s=${encodeURIComponent(wanted)}`,
-      `${this.baseUrl}/series?s=${encodeURIComponent(wanted)}`,
-      `${this.baseUrl}/search?q=${encodeURIComponent(wanted)}`,
-      `${this.baseUrl}/latest` // fallback parse + filter
-    ];
-
-    for (const url of candidates) {
-      try {
-        const request = App.createRequest({ url, method: "GET" });
-        const response = await this.requestManager.schedule(request, 1);
-        this.checkResponseError(response);
-
-        // If the response is JSON, try to parse it and extract series-ish objects
-        const json = this.safeJsonParse(response.data);
-        if (json) {
-          const blob = JSON.stringify(json);
-          // Find /series/<slug> occurrences
-          const re = /\/series\/([a-z0-9-]+)\b/gi;
-          const slugs = [];
-          let m;
-          while ((m = re.exec(blob)) !== null) slugs.push(m[1]);
-
-          const uniqSlugs = this.uniq(slugs).slice(0, 50);
-          const results = uniqSlugs.map(slug =>
-            App.createPartialSourceManga({
-              mangaId: slug,
-              title: slug,
-              image: "",
-              subtitle: ""
-            })
-          );
-
-          // Not great (no title/image), but better than “nothing”.
-          if (results.length) {
-            return App.createPagedResults({ results, metadata: undefined });
-          }
-        }
-
-        // Otherwise parse HTML
-        const $ = load(response.data);
-        let items = this.extractSeriesFromHtml($);
-
-        // Filter by title contains query
-        items = items.filter(x => {
-          const t = (x.title || "").toLowerCase();
-          return t.includes(wantedLower);
-        });
-
-        if (items.length) {
-          return App.createPagedResults({ results: items, metadata: undefined });
-        }
-      } catch (e) {
-        // try next candidate
-      }
-    }
-
-    // Total fallback
-    return App.createPagedResults({ results: [], metadata: undefined });
   }
 };
 return __toCommonJS(QiScans_exports);
