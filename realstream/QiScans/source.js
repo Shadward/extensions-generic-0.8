@@ -15453,6 +15453,10 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
   constructor() {
     super(...arguments);
 
+    async getHomePageSections(sectionCallback) {
+      throw new Error("QiScans patch is running");
+    }
+
     this.baseUrl = DOMAIN;
 
     // Kill the old WordPress/Madara postId behavior
