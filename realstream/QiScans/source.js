@@ -15466,8 +15466,109 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
   }
 
   async getHomePageSections(sectionCallback) {
-    throw new Error("QiScans patch is running");
+  // Use the helper already in your bundle (from realstreamHelper)
+  // If this name isn't in scope for some reason, see the note below.
+  const section = createHomeSection("latest_updates", "Latest Updates", false);
+  sectionCallback(section);
+
+  const request = App.createRequest({
+    url: `${this.baseUrl}/latest`,
+    method: "GET"
+  });
+
+  const response = await this.requestManager.schedule(request, 1);
+  this.checkResponseError(response);
+
+  const $ = this.cheerio.load(response.data);
+
+  const items = [];
+  const seen = new Set();
+
+  // /latest contains <a href="/series/<slug>"> ... <img ...>
+  for (const a of $('a[href^="/series/"]').toArray()) {
+    const href = $(a).attr("href") ?? "";
+    const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+
+    const img = $("img", a).first();
+    const image = img.length ? this.imgUrl($, img) : "";
+    if (!image) continue;
+
+    const alt = (img.attr("alt") ?? "").trim();
+    const title =
+      ($(a).attr("title") ?? "").trim() ||
+      (alt.split(" - ")[0] ?? "").trim() ||
+      slug;
+
+    items.push(
+      App.createPartialSourceManga({
+        mangaId: slug,
+        title,
+        image,
+        subtitle: ""
+      })
+    );
+
+    // keep it light
+    if (items.length >= 50) break;
   }
+
+  section.items = items;
+  sectionCallback(section);
+}
+
+async getSearchResults(query, metadata) {
+  const wanted = (query?.title ?? "").trim().toLowerCase();
+
+  const request = App.createRequest({
+    url: `${this.baseUrl}/latest`,
+    method: "GET"
+  });
+
+  const response = await this.requestManager.schedule(request, 1);
+  this.checkResponseError(response);
+
+  const $ = this.cheerio.load(response.data);
+
+  const results = [];
+  const seen = new Set();
+
+  for (const a of $('a[href^="/series/"]').toArray()) {
+    const href = $(a).attr("href") ?? "";
+    const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+    if (!slug || seen.has(slug)) continue;
+
+    const img = $("img", a).first();
+    const image = img.length ? this.imgUrl($, img) : "";
+    if (!image) continue;
+
+    const alt = (img.attr("alt") ?? "").trim();
+    const title =
+      ($(a).attr("title") ?? "").trim() ||
+      (alt.split(" - ")[0] ?? "").trim() ||
+      slug;
+
+    if (wanted && !title.toLowerCase().includes(wanted)) continue;
+
+    seen.add(slug);
+    results.push(
+      App.createPartialSourceManga({
+        mangaId: slug,
+        title,
+        image,
+        subtitle: ""
+      })
+    );
+  }
+
+  return App.createPagedResults({
+    results,
+    metadata: undefined
+  });
+}
+
+  
 
   // --- helpers (self-contained; doesn't depend on the old parser) ---
   absUrl(url) {
