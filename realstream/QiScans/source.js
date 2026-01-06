@@ -2270,33 +2270,375 @@ exports.realstreamParser = realstreamParser;
 },{"./LanguageUtils":70,"entities":69}],74:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NightScans = exports.NightScansInfo = void 0;
+exports.QiScans = exports.QiScansInfo = void 0;
 const types_1 = require("@paperback/types");
 const realstream_1 = require("../realstream");
 const DOMAIN = 'https://qiscans.org';
-exports.NightScansInfo = {
+exports.QiScansInfo = {
     version: (0, realstream_1.getExportVersion)('0.0.1'),
     name: 'QiScans',
     description: `Extension that pulls manga from ${DOMAIN}`,
     author: 'Netsky',
-    authorWebsite: 'http://github.com/TheNetsky',
+    authorWebsite: 'http://github.com/shadward',
     icon: 'icon.png',
     contentRating: types_1.ContentRating.MATURE,
     websiteBaseURL: DOMAIN,
     intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.HOMEPAGE_SECTIONS | types_1.SourceIntents.CLOUDFLARE_BYPASS_REQUIRED | types_1.SourceIntents.SETTINGS_UI,
     sourceTags: []
 };
-class NightScans extends realstream_1.realstream {
-    constructor() {
-        super(...arguments);
+class QiScans extends realstream_1.realstream {
+    constructor(cheerio) {
+        super(cheerio);
         this.baseUrl = DOMAIN;
+
+        // The old realstream base assumes WordPress/Madara. QiScans revamp doesn't match that.
+        // Disable postId logic entirely.
+        this.usePostIds = false;
+
+        // Not strictly required, but stops other inherited paths from pointing at /manga
+        this.directoryPath = 'series';
+
+        // Paperback expects ISO-ish codes; your base class had a broken emoji string.
+        this.language = 'en';
     }
-    configureSections() {
-        this.homescreen_sections['latest_update'].selectorFunc = ($) => $('div.bsx', $('h2:contains(Latest Update)')?.parent()?.next());
-        this.homescreen_sections['latest_update'].subtitleSelectorFunc = ($, element) => $('a.maincl', element).first().text().trim();
+
+    // ---------- tiny helpers ----------
+    absUrl(url) {
+        if (!url) return '';
+        if (url.startsWith('//')) return 'https:' + url;
+        if (url.startsWith('/')) return this.baseUrl.replace(/\/$/, '') + url;
+        return url;
+    }
+
+    imgUrl($, img) {
+        const el = $(img);
+        const raw =
+            el.attr('data-src') ||
+            el.attr('data-lazy-src') ||
+            (el.attr('srcset') ? el.attr('srcset').split(' ')[0] : undefined) ||
+            el.attr('src') ||
+            el.attr('data-cfsrc') ||
+            '';
+
+        return encodeURI(decodeURI(this.absUrl(raw).split('?resize')[0].trim()));
+    }
+
+    uniqPreserveOrder(arr) {
+        const out = [];
+        const seen = new Set();
+        for (const x of arr) {
+            if (!x || seen.has(x)) continue;
+            seen.add(x);
+            out.push(x);
+        }
+        return out;
+    }
+
+    // ---------- required overrides ----------
+    getMangaShareUrl(mangaId) {
+        return `${this.baseUrl}/series/${mangaId}`;
+    }
+
+    async getMangaDetails(mangaId) {
+        const request = App.createRequest({
+            url: `${this.baseUrl}/series/${mangaId}`,
+            method: 'GET'
+        });
+
+        const response = await this.requestManager.schedule(request, 1);
+        this.checkResponseError(response);
+
+        const $ = this.cheerio.load(response.data);
+
+        // Title
+        const mainTitle =
+            $('h1').first().text().trim() ||
+            $('meta[property="og:title"]').attr('content')?.trim() ||
+            mangaId;
+
+        // Alt titles (QiScans tends to show them right under the main title, comma-separated)
+        let altText = $('h1').first().next().text().trim();
+        if (!altText) altText = $('h1').first().parent().find('p, div').first().text().trim();
+
+        const titles = [mainTitle];
+        if (altText && altText.includes(',')) {
+            for (const t of altText.split(',').map(x => x.trim()).filter(Boolean)) {
+                if (!titles.includes(t)) titles.push(t);
+            }
+        }
+
+        // Cover image (prefer og:image, fallback to first non-logo img)
+        let image =
+            $('meta[property="og:image"]').attr('content')?.trim() ||
+            '';
+
+        if (!image) {
+            const imgs = $('img').toArray();
+            for (const img of imgs) {
+                const alt = ($(img).attr('alt') || '').toLowerCase();
+                const src = this.imgUrl($, img);
+                if (!src) continue;
+                if (alt.includes('qi scans logo')) continue;
+                if (src.toLowerCase().includes('logo')) continue;
+                image = src;
+                break;
+            }
+        } else {
+            image = this.absUrl(image);
+        }
+
+        // Description (Synopsis section)
+        let desc =
+            $('h3:contains("Synopsis"), h2:contains("Synopsis")').first().next().text().trim() ||
+            $('meta[name="description"]').attr('content')?.trim() ||
+            '';
+
+        // Status (best-effort text scan)
+        const pageText = $.text();
+        let status = 'Ongoing';
+        if (/completed/i.test(pageText)) status = 'Completed';
+
+        // Genres: links on the series page look like /series?tag=...
+        const genreTags = [];
+        for (const a of $('a[href*="/series?tag="]').toArray()) {
+            const label = $(a).text().trim();
+            if (!label) continue;
+            const id = label.toLowerCase().replace(/\s+/g, '-');
+            genreTags.push(App.createTag({ id, label }));
+        }
+
+        const tagSections = genreTags.length
+            ? [App.createTagSection({ id: 'genres', label: 'genres', tags: genreTags })]
+            : [];
+
+        return App.createSourceManga({
+            id: mangaId,
+            mangaInfo: App.createMangaInfo({
+                titles,
+                image,
+                status,
+                author: 'Unknown',
+                artist: 'Unknown',
+                tags: tagSections,
+                desc
+            })
+        });
+    }
+
+    async getChapters(mangaId) {
+        const request = App.createRequest({
+            url: `${this.baseUrl}/series/${mangaId}`,
+            method: 'GET'
+        });
+
+        const response = await this.requestManager.schedule(request, 1);
+        this.checkResponseError(response);
+
+        const $ = this.cheerio.load(response.data);
+
+        // QiScans shows “Total Chapters <n>” on the series page. If we can read it, we can generate chapter routes.
+        // (The chapter list itself is loaded dynamically, so scraping <a> tags often yields nothing.)
+        const text = $.text();
+        let total = 0;
+
+        const m1 = text.match(/Total\s+Chapters\s*(\d+)/i);
+        if (m1?.[1]) total = Number(m1[1]);
+
+        // Fallback: sometimes pages say “76 Chapters” etc
+        if (!total) {
+            const m2 = text.match(/(\d+)\s+Chapters/i);
+            if (m2?.[1]) total = Number(m2[1]);
+        }
+
+        // Last-resort fallback: find any "chapter-123" occurrences in the HTML and take max
+        if (!total) {
+            const html = $.html();
+            const re = /chapter-(\d+(?:\.\d+)?)/g;
+            let max = 0;
+            let match;
+            while ((match = re.exec(html)) !== null) {
+                const n = Number(match[1]);
+                if (!isNaN(n) && n > max) max = n;
+            }
+            total = max;
+        }
+
+        if (!total || isNaN(total)) {
+            throw new Error(`Couldn't determine chapter count for ${mangaId}. The site likely moved chapter data behind an API.`);
+        }
+
+        const chapters = [];
+        let sortingIndex = 0;
+
+        for (let i = total; i >= 1; i--) {
+            chapters.push(App.createChapter({
+                id: `chapter-${i}`,
+                mangaId,
+                name: `Chapter ${i}`,
+                chapNum: i,
+                langCode: this.language,
+                time: new Date(),
+                sortingIndex,
+                volume: 0,
+                group: ''
+            }));
+            sortingIndex--;
+        }
+
+        // normalize sortingIndex to 0..N
+        return chapters.map((c, idx) => {
+            // Paperback doesn't require sortingIndex, but keeping stable ordering helps
+            // (We already built descending)
+            return c;
+        });
+    }
+
+    async getChapterDetails(mangaId, chapterId) {
+        const normalized = chapterId.startsWith('chapter-') ? chapterId : `chapter-${chapterId}`;
+
+        const request = App.createRequest({
+            url: `${this.baseUrl}/series/${mangaId}/${normalized}`,
+            method: 'GET'
+        });
+
+        const response = await this.requestManager.schedule(request, 1);
+        this.checkResponseError(response);
+
+        const $ = this.cheerio.load(response.data);
+
+        // Premium gate detection (avoid returning empty page arrays)
+        const text = $.text();
+        if (/unlock/i.test(text) && /coins?/i.test(text)) {
+            throw new Error('This chapter appears to be locked/premium on QiScans.');
+        }
+        if (/premium/i.test(text) && /buy/i.test(text)) {
+            throw new Error('This chapter appears to be locked/premium on QiScans.');
+        }
+
+        // 1) Best case: chapter pages have images with alt like "Chapter Image 1"
+        let pages = $('img[alt^="Chapter Image"], img[alt*="Chapter Image"]').toArray()
+            .map(img => this.imgUrl($, img))
+            .filter(Boolean);
+
+        // 2) Fallback: any images which look like real pages (avoid svg/icons/logos)
+        if (!pages.length) {
+            pages = $('img').toArray()
+                .map(img => this.imgUrl($, img))
+                .filter(u =>
+                    u &&
+                    !u.toLowerCase().endsWith('.svg') &&
+                    !u.toLowerCase().includes('logo') &&
+                    /\.(jpe?g|png|webp)(\?|$)/i.test(u)
+                );
+        }
+
+        // 3) Last resort: regex URLs out of the HTML (handles JSON-in-script patterns)
+        if (!pages.length) {
+            const html = $.html();
+            const matches = [...html.matchAll(/https?:\/\/[^"'\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'\\\s]*)?/gi)]
+                .map(m => m[0]);
+            pages = matches;
+        }
+
+        pages = this.uniqPreserveOrder(pages);
+
+        if (!pages.length) {
+            throw new Error(`Failed to extract page images for ${mangaId} ${normalized}. The reader may now require an API call.`);
+        }
+
+        return App.createChapterDetails({
+            id: normalized,
+            mangaId,
+            pages
+        });
+    }
+
+    // ---------- minimal search + homepage using /latest ----------
+    async getHomePageSections(sectionCallback) {
+        const section = App.createHomeSection({
+            id: 'latest_updates',
+            title: 'Latest Updates',
+            type: types_1.HomeSectionType.singleRowNormal,
+            containsMoreItems: false
+        });
+
+        sectionCallback(section);
+
+        const request = App.createRequest({
+            url: `${this.baseUrl}/latest`,
+            method: 'GET'
+        });
+
+        const response = await this.requestManager.schedule(request, 1);
+        this.checkResponseError(response);
+
+        const $ = this.cheerio.load(response.data);
+
+        const items = [];
+        // Covers have alt like "<Title> - MANHWA cover image" on /latest
+        for (const img of $('img[alt*="cover image"]').toArray()) {
+            const alt = ($(img).attr('alt') || '').trim();
+            const title = alt.split(' - ')[0].trim() || alt.replace(/cover image/i, '').trim();
+            const href = $(img).closest('a').attr('href') || '';
+            const slug = href.replace(/\/$/, '').split('/').pop() || '';
+
+            if (!slug || !title) continue;
+
+            items.push(App.createPartialSourceManga({
+                mangaId: slug,
+                title,
+                image: this.imgUrl($, img),
+                subtitle: ''
+            }));
+        }
+
+        section.items = this.uniqPreserveOrder(items.map(x => JSON.stringify(x)))
+            .map(x => JSON.parse(x));
+
+        sectionCallback(section);
+    }
+
+    async getSearchResults(query, metadata) {
+        // Best-effort search: filter /latest results by title substring.
+        // Not perfect (because /series listing is JS-loaded), but it keeps the source usable.
+        const request = App.createRequest({
+            url: `${this.baseUrl}/latest`,
+            method: 'GET'
+        });
+
+        const response = await this.requestManager.schedule(request, 1);
+        this.checkResponseError(response);
+
+        const $ = this.cheerio.load(response.data);
+
+        const wanted = (query?.title || '').trim().toLowerCase();
+
+        const results = [];
+        for (const img of $('img[alt*="cover image"]').toArray()) {
+            const alt = ($(img).attr('alt') || '').trim();
+            const title = alt.split(' - ')[0].trim() || alt.replace(/cover image/i, '').trim();
+            const href = $(img).closest('a').attr('href') || '';
+            const slug = href.replace(/\/$/, '').split('/').pop() || '';
+
+            if (!slug || !title) continue;
+            if (wanted && !title.toLowerCase().includes(wanted)) continue;
+
+            results.push(App.createPartialSourceManga({
+                mangaId: slug,
+                title,
+                image: this.imgUrl($, img),
+                subtitle: ''
+            }));
+        }
+
+        return App.createPagedResults({
+            results,
+            metadata: undefined
+        });
     }
 }
-exports.NightScans = NightScans;
+
+exports.QiScans = QiScans;
 
 },{"../realstream":71,"@paperback/types":61}],75:[function(require,module,exports){
 "use strict";
