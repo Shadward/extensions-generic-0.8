@@ -15030,7 +15030,7 @@ var _Sources = (() => {
        * Eg. https://mangadark.com/manga/mashle-magic-and-muscles the pathname would be "manga"
        * Default = "manga"
        */
-      this.directoryPath = "manga";
+      this.directoryPath = "series";
       /**
        * Some websites have the Cloudflare defense check enabled on specific parts of the website, these need to be loaded when using the Cloudflare bypass within the app
        */
