@@ -2275,7 +2275,7 @@ const types_1 = require("@paperback/types");
 const realstream_1 = require("../realstream");
 const DOMAIN = 'https://qiscans.org';
 exports.QiScansInfo = {
-    version: (0, realstream_1.getExportVersion)('0.0.1'),
+    version: (0, realstream_1.getExportVersion)('0.0.2'),
     name: 'QiScans',
     description: `Extension that pulls manga from ${DOMAIN}`,
       author: 'Real',
