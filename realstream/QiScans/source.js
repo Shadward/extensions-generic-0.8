@@ -15465,146 +15465,61 @@ Please go to the homepage of <${this.baseUrl}> and press the cloud icon.`);
     this.language = "en";
   }
 
+  async getSearchTags() {
+    return [];
+  }
+
   async getHomePageSections(sectionCallback) {
-  // Use the helper already in your bundle (from realstreamHelper)
-  // If this name isn't in scope for some reason, see the note below.
-  const section = createHomeSection("latest_updates", "Latest Updates", false);
-  sectionCallback(section);
-
-  const request = App.createRequest({
-    url: `${this.baseUrl}/latest`,
-    method: "GET"
-  });
-
-  const response = await this.requestManager.schedule(request, 1);
-  this.checkResponseError(response);
-
-  const $ = load(response.data);
-
-  const items = [];
-  const seen = new Set();
-
-  // /latest contains <a href="/series/<slug>"> ... <img ...>
-  for (const a of $('a[href^="/series/"]').toArray()) {
-    const href = $(a).attr("href") ?? "";
-    const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-
-    const img = $("img", a).first();
-    const image = img.length ? this.imgUrl($, img) : "";
-    if (!image) continue;
-
-    const alt = (img.attr("alt") ?? "").trim();
-    const title =
-      ($(a).attr("title") ?? "").trim() ||
-      (alt.split(" - ")[0] ?? "").trim() ||
-      slug;
-
-    items.push(
-      App.createPartialSourceManga({
-        mangaId: slug,
-        title,
-        image,
-        subtitle: ""
-      })
-    );
-
-    // keep it light
-    if (items.length >= 50) break;
-  }
-
-  section.items = items;
-  sectionCallback(section);
-}
-
-async getSearchResults(query, metadata) {
-  const wanted = (query?.title ?? "").trim().toLowerCase();
-
-  const request = App.createRequest({
-    url: `${this.baseUrl}/latest`,
-    method: "GET"
-  });
-
-  const response = await this.requestManager.schedule(request, 1);
-  this.checkResponseError(response);
-
-  const $ = load(response.data);
-
-  const results = [];
-  const seen = new Set();
-
-  for (const a of $('a[href^="/series/"]').toArray()) {
-    const href = $(a).attr("href") ?? "";
-    const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
-    if (!slug || seen.has(slug)) continue;
-
-    const img = $("img", a).first();
-    const image = img.length ? this.imgUrl($, img) : "";
-    if (!image) continue;
-
-    const alt = (img.attr("alt") ?? "").trim();
-    const title =
-      ($(a).attr("title") ?? "").trim() ||
-      (alt.split(" - ")[0] ?? "").trim() ||
-      slug;
-
-    if (wanted && !title.toLowerCase().includes(wanted)) continue;
-
-    seen.add(slug);
-    results.push(
-      App.createPartialSourceManga({
-        mangaId: slug,
-        title,
-        image,
-        subtitle: ""
-      })
-    );
-  }
-
-  return App.createPagedResults({
-    results,
-    metadata: undefined
-  });
-}
-
+    // Use the helper already in your bundle (from realstreamHelper)
+    // If this name isn't in scope for some reason, see the note below.
+    const section = createHomeSection("latest_updates", "Latest Updates", false);
+    sectionCallback(section);
   
-
-  // --- helpers (self-contained; doesn't depend on the old parser) ---
-  absUrl(url) {
-    if (!url) return "";
-    if (url.startsWith("//")) return "https:" + url;
-    if (url.startsWith("/")) return this.baseUrl.replace(/\/$/, "") + url;
-    return url;
-  }
-
-  imgUrl($, img) {
-    const el = $(img);
-    const raw =
-      el.attr("data-src") ||
-      el.attr("data-lazy-src") ||
-      (el.attr("srcset") ? el.attr("srcset").split(" ")[0] : undefined) ||
-      el.attr("src") ||
-      el.attr("data-cfsrc") ||
-      "";
-
-    return encodeURI(decodeURI(this.absUrl(raw).split("?resize")[0].trim()));
-  }
-
-  uniq(arr) {
-    const out = [];
+    const request = App.createRequest({
+      url: `${this.baseUrl}/latest`,
+      method: "GET"
+    });
+  
+    const response = await this.requestManager.schedule(request, 1);
+    this.checkResponseError(response);
+  
+    const $ = load(response.data);
+  
+    const items = [];
     const seen = new Set();
-    for (const x of arr) {
-      if (!x || seen.has(x)) continue;
-      seen.add(x);
-      out.push(x);
+  
+    // /latest contains <a href="/series/<slug>"> ... <img ...>
+    for (const a of $('a[href^="/series/"]').toArray()) {
+      const href = $(a).attr("href") ?? "";
+      const slug = href.replace(/\/$/, "").split("/").pop() ?? "";
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+  
+      const img = $("img", a).first();
+      const image = img.length ? this.imgUrl($, img) : "";
+      if (!image) continue;
+  
+      const alt = (img.attr("alt") ?? "").trim();
+      const title =
+        ($(a).attr("title") ?? "").trim() ||
+        (alt.split(" - ")[0] ?? "").trim() ||
+        slug;
+  
+      items.push(
+        App.createPartialSourceManga({
+          mangaId: slug,
+          title,
+          image,
+          subtitle: ""
+        })
+      );
+  
+      // keep it light
+      if (items.length >= 50) break;
     }
-    return out;
-  }
-
-  // --- overrides Paperback actually uses ---
-  getMangaShareUrl(mangaId) {
-    return `${this.baseUrl}/series/${mangaId}`;
+  
+    section.items = items;
+    sectionCallback(section);
   }
 
   async getMangaDetails(mangaId) {
@@ -15683,115 +15598,101 @@ async getSearchResults(query, metadata) {
   }
 
   async getChapters(mangaId) {
-    const request = App.createRequest({
-      url: `${this.baseUrl}/series/${mangaId}`,
-      method: "GET"
-    });
+  const request = App.createRequest({
+    url: `${this.baseUrl}/series/${mangaId}`,
+    method: "GET"
+  });
 
-    const response = await this.requestManager.schedule(request, 1);
-    this.checkResponseError(response);
+  const response = await this.requestManager.schedule(request, 1);
+  this.checkResponseError(response);
 
-    const $ = load(response.data);
-    const text = $.text();
+  const $ = load(response.data);
 
-    let total = 0;
+  // Look for actual chapter links on the page
+  const links = $('a[href*="/series/"][href*="chapter"]').toArray()
+    .map(a => $(a).attr("href"))
+    .filter(Boolean);
 
-    const m1 = text.match(/Total\s+Chapters\s*(\d+)/i);
-    if (m1?.[1]) total = Number(m1[1]);
-
-    if (!total) {
-      const m2 = text.match(/(\d+)\s+Chapters/i);
-      if (m2?.[1]) total = Number(m2[1]);
-    }
-
-    if (!total) {
-      const html = $.html();
-      const re = /chapter-(\d+(?:\.\d+)?)/g;
-      let max = 0;
-      let match;
-      while ((match = re.exec(html)) !== null) {
-        const n = Number(match[1]);
-        if (!isNaN(n) && n > max) max = n;
-      }
-      total = max;
-    }
-
-    if (!total || isNaN(total)) {
-      throw new Error(`Couldn't determine chapter count for ${mangaId}. Likely behind an API now.`);
-    }
-
-    const chapters = [];
-    let sortingIndex = 0;
-
-    for (let i = total; i >= 1; i--) {
-      chapters.push(App.createChapter({
-        id: `chapter-${i}`,
-        mangaId,
-        name: `Chapter ${i}`,
-        chapNum: i,
-        langCode: this.language,
-        time: new Date(),
-        sortingIndex,
-        volume: 0,
-        group: ""
-      }));
-      sortingIndex--;
-    }
-
-    return chapters;
+  // If the site renders links server-side, this will work immediately.
+  // If it doesn't, links will be empty and you'll need to find the API it uses.
+  if (!links.length) {
+    throw new Error(
+      `No chapter links found in HTML for ${mangaId}. Chapters are likely loaded via an API/JS.`
+    );
   }
 
-  async getChapterDetails(mangaId, chapterId) {
-    const normalized = chapterId.startsWith("chapter-") ? chapterId : `chapter-${chapterId}`;
+  // Normalize + dedupe
+  const seen = new Set();
+  const chapterUrls = [];
+  for (const href of links) {
+    const abs = this.absUrl(href);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    chapterUrls.push(abs);
+  }
 
-    const request = App.createRequest({
-      url: `${this.baseUrl}/series/${mangaId}/${normalized}`,
-      method: "GET"
-    });
+  // Build chapters from real URLs; store the URL as the chapterId
+  // (Then getChapterDetails can request chapterId directly.)
+  let sortingIndex = 0;
+  const chapters = chapterUrls.map(url => {
+    const name = ($( `a[href="${url.replace(this.baseUrl, "")}"]` ).text() || "").trim() || url.split("/").filter(Boolean).pop();
+    const numMatch = url.match(/chapter[-/](\d+(?:\.\d+)?)/i);
+    const chapNum = numMatch ? Number(numMatch[1]) : 0;
 
-    const response = await this.requestManager.schedule(request, 1);
-    this.checkResponseError(response);
-
-    const $ = load(response.data);
-
-    const text = $.text();
-    if (/unlock/i.test(text) && /coins?/i.test(text)) {
-      throw new Error("This chapter appears to be locked/premium on QiScans.");
-    }
-
-    let pages = $('img[alt^="Chapter Image"], img[alt*="Chapter Image"]').toArray()
-      .map(img => this.imgUrl($, img))
-      .filter(Boolean);
-
-    if (!pages.length) {
-      pages = $("img").toArray()
-        .map(img => this.imgUrl($, img))
-        .filter(u =>
-          u &&
-          !u.toLowerCase().endsWith(".svg") &&
-          !u.toLowerCase().includes("logo") &&
-          /\.(jpe?g|png|webp)(\?|$)/i.test(u)
-        );
-    }
-
-    if (!pages.length) {
-      const html = $.html();
-      pages = [...html.matchAll(/https?:\/\/[^"'\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'\\\s]*)?/gi)]
-        .map(m => m[0]);
-    }
-
-    pages = this.uniq(pages);
-
-    if (!pages.length) {
-      throw new Error(`No pages extracted for ${mangaId} ${normalized}. Reader may require an API call now.`);
-    }
-
-    return App.createChapterDetails({
-      id: normalized,
+    return App.createChapter({
+      id: url,                // <-- IMPORTANT: real URL, not "chapter-37"
       mangaId,
-      pages
+      name: name || `Chapter ${chapNum || "?"}`,
+      chapNum,
+      langCode: this.language,
+      time: new Date(),
+      sortingIndex: sortingIndex--,
+      volume: 0,
+      group: ""
     });
+  });
+
+  return chapters;
+}
+
+    async getChapterDetails(mangaId, chapterId) {
+  const url = chapterId.startsWith("http") ? chapterId : this.absUrl(chapterId);
+
+  const request = App.createRequest({ url, method: "GET" });
+  const response = await this.requestManager.schedule(request, 1);
+  this.checkResponseError(response);
+
+  const $ = load(response.data);
+
+  // Only call it "locked" if we fail to get pages AND we see an obvious paywall element/message.
+  const pageImgs = $('img').toArray()
+    .map(img => this.imgUrl($, img))
+    .filter(u =>
+      u &&
+      !u.toLowerCase().includes("logo") &&
+      !u.toLowerCase().endsWith(".svg") &&
+      /\.(jpe?g|png|webp)(\?|$)/i.test(u)
+    );
+
+  const pages = this.uniq(pageImgs);
+
+  if (!pages.length) {
+    // Make this stricter than your current "unlock/coins anywhere in text"
+    const paywallHint =
+      /locked|premium|subscribe|unlock/i.test($.text()) &&
+      /coin|purchase|payment|login/i.test($.text());
+
+    if (paywallHint) throw new Error("This chapter appears to be locked/premium on QiScans.");
+
+    throw new Error(`No pages extracted. The reader likely loads images via JS/API for: ${url}`);
   }
+
+  return App.createChapterDetails({
+    id: chapterId,
+    mangaId,
+    pages
+  });
+}
 };
 return __toCommonJS(QiScans_exports);
 })();
