@@ -1,4 +1,4 @@
-(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.Sources = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+﻿(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.Sources = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BadgeColor = void 0;
@@ -1458,18 +1458,18 @@ exports.convertDate = convertDate;
 },{}],71:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MangaStream = exports.getExportVersion = void 0;
+exports.realstream = exports.getExportVersion = void 0;
 const types_1 = require("@paperback/types");
-const MangaStreamParser_1 = require("./MangaStreamParser");
+const realstreamParser_1 = require("./realstreamParser");
 const UrlBuilder_1 = require("./UrlBuilder");
-const MangaStreamHelper_1 = require("./MangaStreamHelper");
+const realstreamHelper_1 = require("./realstreamHelper");
 // Set the version for the base, changing this version will change the versions of all sources
 const BASE_VERSION = '3.0.0';
 const getExportVersion = (EXTENSION_VERSION) => {
     return BASE_VERSION.split('.').map((x, index) => Number(x) + Number(EXTENSION_VERSION.split('.')[index])).join('.');
 };
 exports.getExportVersion = getExportVersion;
-class MangaStream {
+class realstream {
     constructor(cheerio) {
         this.cheerio = cheerio;
         // ----REQUEST MANAGER----
@@ -1499,7 +1499,7 @@ class MangaStream {
         });
         this.sourceSettings = (stateManager) => {
             return App.createDUINavigationButton({
-                id: 'mangastream_settings',
+                id: 'realstream_settings',
                 label: 'Source Settings',
                 form: App.createDUIForm({
                     sections: async () => [
@@ -1525,7 +1525,7 @@ class MangaStream {
         /**
          * The language code which this source supports.
          */
-        this.language = '🇬🇧';
+        this.language = 'ðŸ‡¬ðŸ‡§';
         // ----GENERAL SELECTORS----
         /**
          * The pathname between the domain and the manga.
@@ -1604,8 +1604,8 @@ class MangaStream {
         };
         this.homescreen_sections = {
             'popular_today': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('popular_today', 'Popular Today', false, types_1.HomeSectionType.featured),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('popular_today', 'Popular Today', false, types_1.HomeSectionType.featured),
                 selectorFunc: ($) => $('div.bsx', $('h2:contains(Popular Today)')?.parent()?.next()),
                 titleSelectorFunc: ($, element) => $('a', element).attr('title'),
                 subtitleSelectorFunc: ($, element) => $('div.epxs', element).text().trim(),
@@ -1613,8 +1613,8 @@ class MangaStream {
                 sortIndex: 10
             },
             'latest_update': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('latest_update', 'Latest Updates'),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('latest_update', 'Latest Updates'),
                 selectorFunc: ($) => $('div.uta', $('h2:contains(Latest Update)')?.parent()?.next()),
                 titleSelectorFunc: ($, element) => $('a', element).attr('title'),
                 subtitleSelectorFunc: ($, element) => $('li > a, div.epxs', $('div.luf, div.bigor', element)).first().text().trim(),
@@ -1622,37 +1622,37 @@ class MangaStream {
                 sortIndex: 20
             },
             'new_titles': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('new_titles', 'New Titles'),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('new_titles', 'New Titles'),
                 selectorFunc: ($) => $('li', $('h3:contains(New Series)')?.parent()?.next()),
                 subtitleSelectorFunc: ($, element) => $('span a', element).toArray().map(x => $(x).text().trim()).join(', '),
                 getViewMoreItemsFunc: (page) => `${this.directoryPath}/?page=${page}&order=latest`,
                 sortIndex: 30
             },
             'top_alltime': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('top_alltime', 'Top All Time', false),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('top_alltime', 'Top All Time', false),
                 selectorFunc: ($) => $('li', $('div.serieslist.pop.wpop.wpop-alltime')),
                 subtitleSelectorFunc: ($, element) => $('span a', element).toArray().map(x => $(x).text().trim()).join(', '),
                 sortIndex: 40
             },
             'top_monthly': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('top_monthly', 'Top Monthly', false),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('top_monthly', 'Top Monthly', false),
                 selectorFunc: ($) => $('li', $('div.serieslist.pop.wpop.wpop-monthly')),
                 subtitleSelectorFunc: ($, element) => $('span a', element).toArray().map(x => $(x).text().trim()).join(', '),
                 sortIndex: 50
             },
             'top_weekly': {
-                ...MangaStreamHelper_1.DefaultHomeSectionData,
-                section: (0, MangaStreamHelper_1.createHomeSection)('top_weekly', 'Top Weekly', false),
+                ...realstreamHelper_1.DefaultHomeSectionData,
+                section: (0, realstreamHelper_1.createHomeSection)('top_weekly', 'Top Weekly', false),
                 selectorFunc: ($) => $('li', $('div.serieslist.pop.wpop.wpop-weekly')),
                 subtitleSelectorFunc: ($, element) => $('span a', element).toArray().map(x => $(x).text().trim()).join(', '),
                 sortIndex: 60
             }
         };
         this.stateManager = App.createSourceStateManager();
-        this.parser = new MangaStreamParser_1.MangaStreamParser();
+        this.parser = new realstreamParser_1.realstreamParser();
         this.configureSections();
     }
     async getSourceMenu() {
@@ -1774,15 +1774,15 @@ class MangaStream {
             .addPathComponent(this.directoryPath)
             .addQueryParameter('page', page.toString());
         if (query?.title) {
-            urlBuilder = urlBuilder.addQueryParameter('s', encodeURIComponent(query?.title.replace(/[’–][a-z]*/g, '') ?? ''));
+            urlBuilder = urlBuilder.addQueryParameter('s', encodeURIComponent(query?.title.replace(/[â€™â€“][a-z]*/g, '') ?? ''));
         }
         else {
             urlBuilder = urlBuilder
-                .addQueryParameter('genre', (0, MangaStreamHelper_1.getFilterTagsBySection)('genres', query?.includedTags, true))
-                .addQueryParameter('genre', (0, MangaStreamHelper_1.getFilterTagsBySection)('genres', query?.excludedTags, false, await this.supportsTagExclusion()))
-                .addQueryParameter('status', (0, MangaStreamHelper_1.getIncludedTagBySection)('status', query?.includedTags))
-                .addQueryParameter('type', (0, MangaStreamHelper_1.getIncludedTagBySection)('type', query?.includedTags))
-                .addQueryParameter('order', (0, MangaStreamHelper_1.getIncludedTagBySection)('order', query?.includedTags));
+                .addQueryParameter('genre', (0, realstreamHelper_1.getFilterTagsBySection)('genres', query?.includedTags, true))
+                .addQueryParameter('genre', (0, realstreamHelper_1.getFilterTagsBySection)('genres', query?.excludedTags, false, await this.supportsTagExclusion()))
+                .addQueryParameter('status', (0, realstreamHelper_1.getIncludedTagBySection)('status', query?.includedTags))
+                .addQueryParameter('type', (0, realstreamHelper_1.getIncludedTagBySection)('type', query?.includedTags))
+                .addQueryParameter('order', (0, realstreamHelper_1.getIncludedTagBySection)('order', query?.includedTags));
         }
         return App.createRequest({
             url: urlBuilder.buildUrl({ addTrailingSlash: true, includeUndefinedParameters: false }),
@@ -1948,9 +1948,9 @@ class MangaStream {
         }
     }
 }
-exports.MangaStream = MangaStream;
+exports.realstream = realstream;
 
-},{"./MangaStreamHelper":72,"./MangaStreamParser":73,"./UrlBuilder":75,"@paperback/types":61}],72:[function(require,module,exports){
+},{"./realstreamHelper":72,"./realstreamParser":73,"./UrlBuilder":75,"@paperback/types":61}],72:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getFilterTagsBySection = exports.getIncludedTagBySection = exports.createHomeSection = exports.DefaultHomeSectionData = void 0;
@@ -1992,10 +1992,10 @@ exports.getFilterTagsBySection = getFilterTagsBySection;
 },{"@paperback/types":61}],73:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MangaStreamParser = void 0;
+exports.realstreamParser = void 0;
 const LanguageUtils_1 = require("./LanguageUtils");
 const entities = require("entities");
-class MangaStreamParser {
+class realstreamParser {
     constructor() {
         this.isLastPage = ($, id) => {
             let isLast = true;
@@ -2075,8 +2075,8 @@ class MangaStreamParser {
         let sortingIndex = 0;
         let language = source.language;
         // Usually for Manhwa sites
-        if (mangaId.toUpperCase().endsWith('-RAW') && source.language == '🇬🇧')
-            language = '🇰🇷';
+        if (mangaId.toUpperCase().endsWith('-RAW') && source.language == 'ðŸ‡¬ðŸ‡§')
+            language = 'ðŸ‡°ðŸ‡·';
         for (const chapter of $('li', 'div#chapterlist').toArray()) {
             const title = $('span.chapternum', chapter).text().trim();
             const date = (0, LanguageUtils_1.convertDate)($('span.chapterdate', chapter).text().trim(), source);
@@ -2265,17 +2265,17 @@ class MangaStreamParser {
         return cleanId;
     }
 }
-exports.MangaStreamParser = MangaStreamParser;
+exports.realstreamParser = realstreamParser;
 
 },{"./LanguageUtils":70,"entities":69}],74:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NightScans = exports.NightScansInfo = void 0;
 const types_1 = require("@paperback/types");
-const MangaStream_1 = require("../MangaStream");
+const realstream_1 = require("../realstream");
 const DOMAIN = 'https://qiscans.org';
 exports.NightScansInfo = {
-    version: (0, MangaStream_1.getExportVersion)('0.0.1'),
+    version: (0, realstream_1.getExportVersion)('0.0.1'),
     name: 'QiScans',
     description: `Extension that pulls manga from ${DOMAIN}`,
     author: 'Netsky',
@@ -2286,7 +2286,7 @@ exports.NightScansInfo = {
     intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.HOMEPAGE_SECTIONS | types_1.SourceIntents.CLOUDFLARE_BYPASS_REQUIRED | types_1.SourceIntents.SETTINGS_UI,
     sourceTags: []
 };
-class NightScans extends MangaStream_1.MangaStream {
+class NightScans extends realstream_1.realstream {
     constructor() {
         super(...arguments);
         this.baseUrl = DOMAIN;
@@ -2298,7 +2298,7 @@ class NightScans extends MangaStream_1.MangaStream {
 }
 exports.NightScans = NightScans;
 
-},{"../MangaStream":71,"@paperback/types":61}],75:[function(require,module,exports){
+},{"../realstream":71,"@paperback/types":61}],75:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.URLBuilder = void 0;
@@ -2361,3 +2361,4 @@ exports.URLBuilder = URLBuilder;
 
 },{}]},{},[74])(74)
 });
+
